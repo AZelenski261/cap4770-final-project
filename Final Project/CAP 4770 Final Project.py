@@ -1,3 +1,8 @@
+import warnings
+warnings.filterwarnings('ignore')
+    # Supresses Neural Net Warning "ConvergenceWarning: Stochastic Optimizer: Maximum iterations (200) reached and the optimization hasn't converged yet."
+    # Supresses QDA Warning "UserWarning: Variables are collinear"
+
 import pandas as pd
 import numpy as np
 import datetime
@@ -10,6 +15,7 @@ from sklearn.neural_network import MLPClassifier
 from sklearn.naive_bayes import GaussianNB
 from sklearn.discriminant_analysis import QuadraticDiscriminantAnalysis
 from sklearn import preprocessing
+from sklearn import model_selection
 
 def main():
     pd.set_option('display.max_columns', None)
@@ -25,6 +31,39 @@ def main():
         dtype={'PassengerId' : int, 'Pclass' : int, 'Name' : str, 'Sex' : str, 'Age' : float, 'SibSp' : int, 'Parch' : int, 'Ticket' : str, 'Fare' : float, 'Cabin' : str, 'Embarked' : str}
     )
 
+    # copy of datasets, originals may be needed for reference
+    trainCopy = trainData.copy(deep = True)
+    testCopy = testData.copy(deep = True)
+    datasets = [trainCopy, testCopy]
+
+    ######################################### Engineer "Title" #########################################
+    # since Name is a complete feature, we will use it to engineer the "Title" feature
+    for dataset in datasets:
+        dataset['Title'] = dataset['Name'].str.split(", ", expand=True)[1].str.split(".", expand=True)[0]
+    
+    print("Titles in TRAIN:")
+    print(datasets[0]['Title'].value_counts())
+    print("-------------------")
+    print("Titles in TEST:")
+    print(datasets[1]['Title'].value_counts())
+
+    # replace "rare" (fewer than 10 instances) and foreign titles with english equivalent
+    for dataset in datasets:
+        dataset['Title'] = dataset['Name'].str.split(", ", expand=True)[1].str.split(".", expand=True)[0]
+        dataset['Title'] = dataset['Title'].replace(['Lady', 'the Countess','Capt', 'Col', 'Don', 'Dr', 'Major', 'Rev', 
+                                                    'Sir', 'Jonkheer', 'Dona'], 
+                                                    'Rare')
+
+        dataset['Title'] = dataset['Title'].replace('Mlle', 'Miss')
+        dataset['Title'] = dataset['Title'].replace('Ms', 'Miss')
+        dataset['Title'] = dataset['Title'].replace('Mme', 'Mrs')
+    
+    print("\n\nTitles in TRAIN:")
+    print(datasets[0]['Title'].value_counts())
+    print("-------------------")
+    print("Titles in TEST:")
+    print(datasets[1]['Title'].value_counts())
+
     ############################################ Remove NaNs ###########################################
     #
     # NaNs in the Data
@@ -33,39 +72,52 @@ def main():
     # 'Fare' - NaNs present in test (1) data
     # 'Cabin' - NaNs present in test (327) and train (687) data
     # 'Embarked' - NaNs present in train (2) data
-    #
-    # The NaNs in the trainData Age column are replaced by the median of the train Age
-    trainDataAgeMedian = trainData['Age'].median(skipna=True)
-    trainData['Age'] = trainData['Age'].fillna(trainDataAgeMedian).astype(int)
+    
+    # find incomplete columns
+    print("\n\nSums of incomplete TRAINING values:")
+    print(datasets[0].isnull().sum())
+    print("------------------------------")
+    print("Sums of incomplete TEST values:")
+    print(datasets[1].isnull().sum())
 
-    # The NaNs in the testData Age column are replaced by the median of the test Age
-    testDataAgeMedian = testData['Age'].median(skipna=True)
-    testData['Age'] = testData['Age'].fillna(testDataAgeMedian).astype(int)
+    for dataset in datasets:
+        # because a number decks housed first-, second-, and third-class passengers, 
+        # we doubt the significance of the Cabin feature and will not attempt to complete it
+        dataset.drop('Name', axis = 1, inplace = True)
+        dataset.drop('Cabin', axis = 1, inplace = True)
+        dataset.drop('Ticket', axis = 1, inplace = True)          # Ticket also appears to be insignificant
+        dataset.drop('PassengerId', axis = 1, inplace = True)     # as does PassengerId
 
-    # The NaNs in the testData Fare column are replaced by the median of the test Fare
-    testDataFareMedian = testData['Fare'].median(skipna=True)
-    testData['Fare'] = testData['Fare'].fillna(testDataFareMedian).astype(int)
+    # now that we have the Title attribute, we will complete the Age feature using the
+    # median age associated with each title, and complete the rest of the features
+    for dataset in datasets:
+        dataset['Age'] = dataset.groupby('Title', as_index = True)['Age'].apply(lambda age: age.fillna(age.median()))
+        dataset['Embarked'].fillna(dataset['Embarked'].mode()[0], inplace = True)
+        dataset['Fare'].fillna(dataset['Fare'].median(), inplace = True)
 
-    ####################### Create FamilySize and AgeClassInteraction attributes #######################
-    trainData['AgeClassInteraction'] = trainData['Age'] * trainData['Pclass']
-    testData['AgeClassInteraction'] = testData['Age'] * testData['Pclass']
-    trainData['FamilySize'] = trainData['SibSp'] + trainData['Parch']
-    testData['FamilySize'] = testData['SibSp'] + testData['Parch']
+    ####################################### Feature Engineering ########################################
+    # FamilySize = siblings + spouse + parents + children
+    # AgeClassInteraction = product of age and passenger class
+    for dataset in datasets:
+        dataset['FamilySize'] = dataset['SibSp'] + dataset['Parch'] + 1
+        dataset['AgeClassInteraction'] = dataset['Age'] * dataset['Pclass']
 
     ##################################### Determine Columns to Use #####################################
     # List of columns to use in creating the model and the data type
     #   'C' - Categorical
     #   'N' - Numeric
     #   'O' - Ordinal
-    colList = [('Pclass', 'O'), ('Sex', 'C'), ('Age', 'N'), ('SibSp', 'N'), ('Parch', 'N'), ('Fare', 'N'), ('FamilySize', 'N'), ('AgeClassInteraction', 'N')]
+    colList = [('Pclass', 'O'), ('Sex', 'C'), ('Age', 'N'), ('SibSp', 'N'), ('Parch', 'N'), ('Fare', 'N'), ('Embarked', 'C'), ('Title', 'C'), ('FamilySize', 'N'), ('AgeClassInteraction', 'N')]
 
     ######################################### Preprocess Data ##########################################
-    trainDataArray = preprocessData(trainData, colList)
-    testDataArray = preprocessData(testData, colList)
+    preprocessedDatasets = [preprocessData(dataset, colList) for dataset in datasets]
 
     ########################################## Create Model(s) #########################################
+    # Inspiration for Classifier Models was taken from the following page
+    # https://scikit-learn.org/stable/auto_examples/classification/plot_classifier_comparison.html
     classifiers = [
-        ("Nearest Neighbors", KNeighborsClassifier()),
+        ("Default Nearest Neighbors", KNeighborsClassifier()),
+        ("10 Nearest Neighbors (Brute)", KNeighborsClassifier(n_neighbors=10, algorithm='brute')),
         ("SVM", SVC()),
         ("Gaussian Process", GaussianProcessClassifier()),
         ("Decision Tree", DecisionTreeClassifier()),
@@ -78,28 +130,34 @@ def main():
 
     models = []
     for i in range(len(classifiers)):
-        models.append((classifiers[i][0], classifiers[i][1].fit(trainDataArray, trainData['Survived'])))
+        models.append((classifiers[i][0], classifiers[i][1].fit(preprocessedDatasets[0], datasets[0]['Survived'])))
 
     ########################################## Get Predictions #########################################
     summaryDF = testData[['PassengerId']].copy()
     resultDFs = [] # List of tuples of Model name [0] and resulting dataframe (columns PassengerId and Survived) [1]
     
     for model in models:
-        resultDFs.append((model[0], getPredictions(model[1], testData['PassengerId'], testDataArray)))
-        summaryDF[model[0] + ' Survived'] = resultDFs[-1][1]['Survived']
+        resultDFs.append((model[0], getPredictions(model[1], testData['PassengerId'], preprocessedDatasets[1])))
+        summaryDF[model[0]] = resultDFs[-1][1]['Survived']
     
     print('\n\n')
     print(summaryDF.head(10))
     summaryDF.to_csv(path_or_buf='modelSummary ' + datetime.datetime.now().strftime("%Y-%m-%d at %H.%M.%S") + '.csv', header=True, index=False, mode='w')
 
+    print('\n\nScoring Models:')
+    for model in models:
+        cv_split = model_selection.ShuffleSplit(n_splits = 10, test_size = .3, train_size = .6, random_state = 0)
+        cv_results = model_selection.cross_validate(model[1], preprocessedDatasets[0], trainCopy['Survived'], cv  = cv_split)
+        score = cv_results['test_score'].max()
+        print('    ' + model[0] + ': ' + str(score))
+    print()
     # Result DataFrame to .csv for Kaggle Submission
     #resultDFs['Insert Classifier Number'][1].to_csv(path_or_buf='kaggle_submission ' + datetime.datetime.now().strftime("%Y-%m-%d at %H.%M.%S") + '.csv', header=True, index=False, mode='w')
 
 
 
-# For Numeric and Ordinal values, NOTHING is done,
-#   For Categorical values, they are processed converted to Ordinal values
-# Throws an error if NaNs are present in the column
+# For Numeric and Ordinal values, NOTHING is done, for Categorical values, they are converted to Ordinal values
+# https://scikit-learn.org/stable/modules/generated/sklearn.preprocessing.OrdinalEncoder.html
 def preprocessData(dataFrame: pd.DataFrame, columnsToProcess: list) -> np.array:
     tempData = []
     enc = preprocessing.OrdinalEncoder()
