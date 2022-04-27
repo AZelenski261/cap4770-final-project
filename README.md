@@ -1,11 +1,6 @@
 # cap4770-final-project
 ## Required Packages
-Graphviz\n
-Matplotlib\n
-Numpy\n
-Pandas\n
-Seaborn\n
-SKLearn
+Graphviz, Matplotlib, Numpy, Pandas, Seaborn, and SKLearn
 
 ## Datasets
 The datasets can be downloaded from Kaggle at https://www.kaggle.com/competitions/titanic/data.
