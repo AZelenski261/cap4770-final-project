@@ -1,10 +1,10 @@
 # cap4770-final-project
 ## Required Packages
-Graphviz
-Matplotlib
-Numpy
-Pandas
-Seaborn
+Graphviz\n
+Matplotlib\n
+Numpy\n
+Pandas\n
+Seaborn\n
 SKLearn
 
 ## Datasets
